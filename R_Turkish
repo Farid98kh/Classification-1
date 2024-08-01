@@ -1,0 +1,864 @@
+####################
+# Farid Khorshidi  #
+#------------------#
+# Öğrenci Numarası #
+#    2022900191    #
+#------------------#
+#     Denetimli    #
+#   İstatistiksel  #
+#      Öğrenme     #
+#   Final Sınavı   #
+#------------------#
+
+library(readr)
+library(corrplot)
+library(caret)
+library(tidyverse)
+library(magrittr)
+library(olsrr)
+library("neuralnet")
+library(car)
+library(corrplot)
+library(nortest)
+library(ISLR)
+library(Hmisc)
+library(caret)
+library(dplyr)
+library(ModelMetrics)
+library(lmtest)
+library(moments)
+library(bestNormalize) # normalizasyon 
+library(MASS)
+library(psych) 
+library(mvnTest) #multivariate normality test kutuphanesi
+library(tree) #regresyon ve karar agaclari kutuphanesi
+library(randomForest) # random forest kutuphanesi
+library(rpart)       # regresyon agaclari
+library(rpart.plot)  # plotting regression trees
+library(ipred)       # bagging
+library(klaR)
+library(rpart.plot)
+library("mice")
+library(ggplot2)
+library(devtools)
+library(ggord)
+library(heplots)
+library(pROC)
+library(rlang)
+
+
+
+# heart veri setini 'kmed' paketinden "get" fonksyonu ile cagiriyoruz
+df <- get(data("heart", package= "kmed"))
+str(df)
+
+#heart veri setini analiz etmek için
+#sınıflandırma ağaçlarını kullanarak başlayacağız.
+#Bu verilerde, class kesikli ama 4 duzeyli bir değişkendir ve bu nedenle onu
+#binary bir değişkene dönüştürerek başlıyoruz.
+#bunun icin 0 degeri alan class verileri icin 0
+# ve 0 olmayanlar icin 1 atadik.
+df$class[df$class == 0 ] <- 0
+df$class[df$class != 0 ] <- 1
+df$sex[df$sex == FALSE] <- 0
+df$fbs[df$fbs == FALSE] <- 0
+df$exang[df$exang == FALSE] <- 0
+
+
+# bir siniflandirma problemi oldugu icin numeric deger turunde olan degiskenleri
+# degistirmiyoruz ama onun disinda diger veri turunde olan ve kategorik degiskenleri bagimli degisken
+# ile birlikte factor turune ceviriyoruz
+df$sex <- as.factor(df$sex)
+df$fbs <- as.factor(df$fbs)
+df$exang <- as.factor(df$exang)
+df$class <- as.factor(df$class)
+
+# toplamda 14 tane sutundan ve 297 tane veriden kayip veri olmaksizin
+# olusmus bagimli degiskenle birlikte 8 tane factor ve kesikli
+# ve 6 tane numeric degisken gorulmektedir.
+# ozet istatistiklerine bakarak her bir degiskeni yorumlayabiliriz
+str(df)
+dim(df)
+sum(is.na(df))
+summary(df)
+
+#Veriler üzerindeki bir sınıflandırma probleminin performansını
+#düzgün bir şekilde değerlendirmek için, ilk önce gözlemleri bir 
+#eğitim seti ve bir test seti olarak ayırdık:
+smp_size <- floor(0.70 * nrow(df))
+set.seed(2022900191) 
+train_ind <- sample(nrow(df), size = smp_size, replace = FALSE)
+train <- df[train_ind, ]
+test <- df[-train_ind, ]
+str(train)
+str(test)
+
+
+
+#############################################################################################################################################################################
+
+
+
+###################################################
+#-------------------------------------------------#
+#             Classification tree                 #
+#-------------------------------------------------#
+###################################################
+#tüm değişkenleri kullanarak class'i tahmin etmek için
+# tree() fonksyonunu kullanıyoruz
+treeclass <- tree(class~. ,  train )
+summary(treeclass )
+
+classification = rpart(class~.,method = "class", data = train)
+rpart.plot(classification,type = 1,extra= 3,
+        fallen.leaves= FALSE,clip.facs= FALSE,
+        faclen= 0, cex = 0.5,xlim= c(0, 1),ylim= c(0, 1))
+
+# error rate önemli:yanlis siniflandirma hatasi
+# Toplam 15 terminal node yani uc dugum ile ağaç oluşturulmuş.
+#ağaçta dahili düğümler (karar noktalarını oluşturan)
+# olarak kullanılan değişkenler sayisi 9 tane dir
+# Residual mean deviance 0.5209 olarak dikkat çekiyor.
+# Eğitim hata oranının yani Error rate 0.1256 gibi normal
+#sayılabilecek bir değer aldigini goruyoruz.
+# Sınıflandırma ağaçları için, summary() çıktısında bildirilen sapma şu şekilde verilir:
+# science smith***
+
+
+#Ağaç yapısını görüntülemek için plot() 
+#fonksyonunu ve düğüm etiketlerini görüntülemek için text() fonksyonunu kullanırız.
+plot(treeclass )
+text(treeclass ,pretty =0)
+# İlk dugum kategorik (3)normal , (6)fixed defect, (7)reversable defect
+# ayırdığından, kalp hastaligi olmasinda en önemli göstergesi olarak görünmektedir.
+#thal: 3 root node olarak saptanmistir.
+
+
+tree_pred <- predict(treeclass, test, type = "class")
+table(tree_pred, test$class)
+#ağacın test verileri üzerindeki performansını
+#değerlendirdigimizde Bu yaklaşım, test veri setinin yaklaşık
+#(42+29)/90 = %79'si için doğru tahminlere yol açar.
+
+###########################################################
+##############          Budama               ##############
+###########################################################
+# ağacı budamanın daha iyi sonuçlara yol açıp
+# açmayacağına bakacagiz.
+# ağaç karmaşıklığının en uygun düzeyini belirlemek
+#için cross valdition gerçekleştirir
+cv.treeclass <- cv.tree(treeclass, FUN = prune.misclass)
+cv.treeclass
+par(mfrow=c(1,2))
+plot(cv.treeclass$size ,cv.treeclass$dev ,type="b")
+plot(cv.treeclass$k ,cv.treeclass$dev ,type="b")
+# deviance alaninin cross valdiation hata oranina 
+# karsilik geldigini biliyoruz
+# 6 dugumlu agaca en az hata orani 41'e karsilik gelmis
+# grafikten de bunu gore biliriz
+
+# Her iki grafik de incelendiğinde size'ın 6 olduğu noktada deviance'de belirgin azalmalar dikkat çekmekte.
+# Bu sebeple size 6 olarak seçilerek budamaya devam edilecektir.
+
+#simdi 13 dugumden olusan agaci best=6 ile budama 
+prune.treeclass <- prune.misclass (treeclass,best=6)
+summary(prune.treeclass)
+dev.off()
+plot(prune.treeclass )
+text(prune.treeclass ,pretty =0)
+# ağaçta dahili düğümler (karar noktalarını oluşturan)
+# olarak kullanılan değişkenler sayisi 4 tane dir.
+# Budama sonrası yalnızca 6 node ile model residual mean deviance'ının 0.8011 olarak bir artış göstermiş görünüyor.
+# Error rate'de de artış görülmekte.
+# terminal dugum azaldigi icin cok verimli bir agac oldugu soylenilemez.
+
+################################
+### Budama oncesi  Tahminler ###
+#-------------------------------
+
+#######              #############
+####### train verisi #############
+#######              #############
+classtree.pred <- predict(treeclass ,train ,type="class")
+caret::confusionMatrix(classtree.pred, train$class)
+# Accuracy Rate :0.8744 
+# Sensitivity : 0.9375  
+# Specificity :0.8000  
+
+
+#######              #############
+####### test  verisi #############
+#######              #############
+classtree.predtest <- predict(treeclass, test, type = "class")
+caret::confusionMatrix(classtree.predtest, test$class)
+
+# Accuracy Rate : 0.7889 
+# Sensitivity :0.8750   
+# Specificity :0.6905 
+
+
+
+################################
+### Budama sonrasi Tahminler ###
+#-------------------------------
+
+##################################
+####### train verisi #############
+#######              #############
+prunedtree.pred <- predict(prune.treeclass ,train ,type="class")
+caret::confusionMatrix(prunedtree.pred, train$class)
+# Accuracy Rate :0.8599
+# Sensitivity : 0.8929 
+# Specificity :0.8211  
+
+
+#######              #############
+####### test  verisi #############
+#######              #############
+prunedtree.predtest <- predict(prune.treeclass, test, type = "class")
+caret::confusionMatrix(prunedtree.predtest, test$class)
+# Accuracy Rate : 0.8  
+# Sensitivity :0.8542
+# Specificity :0.7381   
+
+# sadece Test verisinde budanmadan sonra aciklayicilik biraz artmis
+# train verisinde aciklayicilik azalmistir
+# sensitivity hem test ve hem trainde budanmadan sonra azalmis.
+
+# Budama sonrası sınıflandırmanın performansının, ama test verisinin accuracy rate degerinin az artisi
+#disinda düştüğünü accuracy rate, sensivity ve specificity değerleri incelenerek kolaylıkla gözlemlenebilir.
+
+
+
+################################################################################################################################################
+
+
+
+###################################################
+#-------------------------------------------------#
+#                    Bagging                      #
+#-------------------------------------------------#
+###################################################
+
+bag <- randomForest(class~. ,data=train, mtry=13,importance=TRUE)
+
+bag$importance
+varImpPlot(bag)
+
+#######              #############
+####### train verisi #############
+#######              #############
+
+baggintrain <- predict(bag ,train ,type="class")
+
+caret::confusionMatrix(baggintrain, train$class)
+
+
+#######              #############
+####### test  verisi #############
+#######              #############
+
+baggintest <- predict(bag, test, type = "class")
+caret::confusionMatrix(baggintest, test$class)
+
+
+
+#############################################################################################################################################################################
+
+
+
+###################################################
+#-------------------------------------------------#
+#               Random Forest                     #
+#-------------------------------------------------#
+###################################################
+
+rf <- randomForest(class~. ,data=train, mtry=4,importance=TRUE)
+plot(rf)
+
+rf$importance
+varImpPlot(rf)
+
+
+
+rf_pred <- predict(rf ,train ,type="class")
+
+caret::confusionMatrix(rf_pred, train$class)
+
+
+
+
+rf_tahmin <- predict(rf, test, type = "class")
+
+caret::confusionMatrix(rf_tahmin, test$class)
+
+
+################################################################################################################################################
+
+
+
+###################################################
+#-------------------------------------------------#
+#             Logistic Regression                 #
+#-------------------------------------------------#
+###################################################
+
+logmodel1 <- glm(class ~ age + sex + cp + trestbps + chol +
+        fbs + restecg + thalach + exang + oldpeak + slope +
+        ca + thal , data = train, family = binomial)
+
+summary(logmodel1)
+coefficients(logmodel1)
+residuals(logmodel1)
+plot(logmodel1)
+
+
+
+# Katsayılar lojistik Regresyonda olasılık değerini doğrusal olarak etkilemez.
+# Bağımsız değişkenin değerini bir birim arttırdığımızda tahmin değerindeki değişikliği
+# belirlemek için önce log(odds) formulünde her iki tarafa exp fonksiyonu uygulanır.
+# Önemli Nokta burada farklarına bakmıyoruz iki tahminin oranına bakıyor
+
+
+#######    Anlamli   #############
+####### degiskenlerin ############
+#######    yorumu    #############
+
+exp(1.811705)
+# sexTRUE değişkenindeki 1 birimlik artis, odds oranini 6.12 kat degistirir.
+
+exp(1.818234)
+#cp4 değişkenindeki 1 birimlik artis, odds oranini 6.16 kat degistirir.
+
+exp(0.026729)
+#trestbps değişkenindeki 1 birimlik artis, odds oranini 1.027 kat degistirir.
+
+
+exp(1.080424)
+#ca değişkenindeki 1 birimlik artis, odds oranini 2.94 kat degistirir.
+
+exp(1.250900)
+# thal7 değişkenindeki 1 birimlik artis, odds oranini 3.49 kat degistirir.
+
+
+confint.default(logmodel1)
+
+# katsayısına ait %95 lik güven aralığı sıfır değerini kapsadığı için H0 hipotezi red edilemeyerek aşağıdaki değişkenlerin
+# class degiskenine etkisinin istatistiksel olarak anlamlı olmadığına karar verilir.
+# age , cp2 , cp3 , chol , fbsTRUE , restecg1 , restecg2 , thalach , exangTRUE , 
+# oldpeak , slope2 , slope3 , thal6
+
+
+# odds için güven aralığı
+# Eğer odds oran değerine ait güven aralığı 1 değerini içermiyor ise H0 hipotezi red edilerek ilgili katsayının istatistiksel olarak anlamlı olduğuna karar verilir.
+odds.confint <- exp(confint.default(logmodel1))
+odds.confint
+str(df)
+# cinsiyeti erkek olan bir kisinin class 1 olma oddsu %95 güvenle cinsiyeti kadin olanin 1.63 ile 22.97 katı arasında değer alır.
+# cp4 asymptomatic bir birim büyük olan bir kişinin cp1 e gore class 1 yani kalp hastaligi olma oddsu %95 güvenle 1.16 katı ile 32.62 katı arasında değer alır.
+# trestbps istrahat kan basinci bir birim artarsa bir birimin dusugune gore, class 1 yani kalp hastaligi olma oddsu %95 güvenle 1 ile 1.05 katı arasında değer alır.
+# chol bir birim artarsa bir birim dusugune gore, class 1 yani kalp hastaligi olma oddsu %95 güvenle 1 ile 1.05 katı arasında değer alır.
+# ca bir birim artarsa bir birim dusugune gore, class 1 yani kalp hastaligi olma oddsu %95 güvenle 1.59 ile 5.43 katı arasında değer alır.
+# thal7 bir birim buyuk olan bir kisinin thal3 e gore, class 1 yani kalp hastaligi olmaoddsu %95 guvenle 1.30 ile 9.37 arasinda deger alir.
+
+## modelin anlamliligi
+
+#𝐻 0 : 𝛽 1 = 𝛽 2 = ⋯ = 𝛽 𝑘 = 0
+# 𝐻 1 : 𝐸𝑛 𝑎𝑧𝚤𝑛𝑑𝑎𝑛 𝑏𝑖𝑟 𝛽 𝑗 ≠ 0
+
+# G= Null deviance-Residual Deviance
+
+285.57 - 133.00
+206 - 188
+
+
+1-pchisq(38.46, 18)
+# p değeri 0.00336523 oldu ve 0.5'dan küçük çıkmıştır.
+# H 0 :β AGE = 0 hipotezi red edilir.
+# Bağımsiz değişkenlerin class değişkenini açıklamada etkili olduğunu söyleyebilecek yeterli istatistiksel kanıtımız bulunmaktadır.
+
+
+vif(logmodel1)
+# herhangi bir bağlantı problemi görülmemektedir.
+
+# SPECIFICITY AND SENSITIVITY
+
+# Çalışılan bu siniflandirma örneğe göre threshold degerini ozet istatistiklerine dayali ikisinden birini seçip
+# onu mümkün olduğunca yükseltmek doğru seçenektir.
+
+#######              #############
+####### train verisi #############
+#######     1        #############
+
+pred_log1 <- fitted(logmodel1)
+summary(pred_log1)
+threshold <- 0.357706
+
+# threshold atamasini tanimliyoruz.
+# threshold degeri ppred uyumlu degerden az olursa 0 fazla olursa 1 atariz
+pred_log1[pred_log1 > threshold] <- 1
+pred_log1[pred_log1 < threshold] <- 0
+
+sensitivity(pred_log1, train$class)
+specificity(pred_log1, train$class)
+# biraz artış olsa da yine de istediğim oranı sağlayamadım
+
+#Confusion Matrix
+
+caret::confusionMatrix(as.factor(pred_log1), train$class)
+
+#######              #############
+####### test  verisi #############
+#######      1       #############
+pred_log = predict(logmodel1, newdata=test, type='response')
+summary(pred_log)
+threshold <- 0.357706
+pred_log[pred_log > threshold] <- 1
+pred_log[pred_log < threshold] <- 0
+
+sensitivity(pred_log, test$class)
+specificity(pred_log, test$class)
+
+# Confusion Matrix
+caret::confusionMatrix(as.factor(pred_log), test$class)
+
+
+#######              #############
+####### train verisi #############
+#######     2        #############
+pred_log1 <- fitted(logmodel1)
+summary(pred_log1)
+threshold <- 0.458937
+pred_log1[pred_log1 > threshold] <- 1
+pred_log1[pred_log1 < threshold] <- 0
+
+sensitivity(pred_log1, train$class)
+specificity(pred_log1, train$class)
+# biraz artış olsa da yine de istediğim oranı sağlayamadım
+
+#Confusion Matrix
+caret::confusionMatrix(as.factor(pred_log1), train$class)
+
+#######              #############
+####### test  verisi #############
+#######       2      #############
+
+pred_log = predict(logmodel1, newdata=test, type='response')
+threshold <- 0.458937
+pred_log[pred_log > threshold] <- 1
+pred_log[pred_log < threshold] <- 0
+
+sensitivity(pred_log, test$class)
+specificity(pred_log, test$class)
+
+# Confusion Matrix
+caret::confusionMatrix(as.factor(pred_log), test$class)
+
+
+#######              #############
+####### train verisi #############
+#######     3        #############
+pred_log1 <- fitted(logmodel1)
+summary(pred_log1)
+threshold <- 0.80
+pred_log1[pred_log1 > threshold] <- 1
+pred_log1[pred_log1 < threshold] <- 0
+
+sensitivity(pred_log1, train$class)
+specificity(pred_log1, train$class)
+
+#Confusion Matrix
+caret::confusionMatrix(as.factor(pred_log1), train$class)
+
+#######              #############
+####### test  verisi #############
+#######     3        #############
+pred_log = predict(logmodel1, newdata=test, type='response')
+summary(pred_log)
+threshold <- 0.80
+pred_log[pred_log > threshold] <- 1
+pred_log[pred_log < threshold] <- 0
+
+sensitivity(pred_log, test$class)
+specificity(pred_log, test$class)
+
+# Confusion Matrix
+caret::confusionMatrix(as.factor(pred_log), test$class)
+
+
+
+##############################################################################################################################################################################
+
+
+
+str(df)
+# veride 1, 4, 5, 8, 10, 12 degiskenleri numeric ve onlari LDA ve QDA da kullanacagiz.
+train_num = train[,c(1,4,5,8,10,12,14)]
+test_num = test[,c(1,4,5,8,10,12,14)]
+
+###################################################
+#-------------------------------------------------#
+#          LINEAR DISCRIMINANT ANALYSIS           #
+#-------------------------------------------------#
+###################################################
+
+# Grupların ortalamaları arasında maksimum ayrımı yapacak şekilde bileşen belirler.Varsayımlar: 
+
+
+# • Eğer gruplar iyi ayrılmış ise lojistik regresyona göre daha durağan sonuç verir.
+# • Eğer örneklem büyüklüğü küçük ve açıklayıcı değişkenler normal dağılıma sahip ise LDA daha iyi performans gösteriyor.
+# • Eğer bağımlı değişken ikiden fazla sıralı olmayan kategoriye sahip ise LDA daha iyi sonuç verir.
+# • LDA ve lojistik regresyon yöntemleri doğrusal karar sınırları verir.
+# • Eğer gerçek sınırlar doğrusal ise LDA ve Lojistik regresyon yöntemleri iyi performans gösterirler.
+
+pairs.panels(train_num,
+             gap=0,
+             bg=c("red","blue")[train_num$class],
+             pch=21)
+
+desc=describeBy(train[1:13], train[,14])
+desc
+
+desc=describeBy(train[1:13], train[,12])
+# her bir tür için bakmak skor hesaplaması için gerekli
+desc
+
+model_lda<-lda(class~.,data = train_num)
+model_lda
+model_lda$prior
+# %kaç değer aldıklarını
+
+
+pred_lda<-predict(model_lda,train_num)
+hist_lda1<-ldahist(data=pred_lda$x[,1],g=train_num$class) 
+
+
+
+
+pred_lda$class # tahmine göre sınıf ayırması
+pred_lda$posterior # gözlemlerin gruplara dahil olma olasılıklarını verir. birbirine yakın olasılıkların değeri çok fazla
+pred_lda$x # fonksiyonda gözlemlerin aldığı değerleri gösterir .histogram karşılaştırmasıyla aynı değerleri alır
+
+
+str(train_num)
+partimat(class ~., data=train_num,method="lda") #  kırmızılar yanlış etiketleme gösterir | iyi ayrışma yok
+partimat(class ~ ., data = train_num, method = "lda", 
+         plot.matrix = TRUE, imageplot = FALSE)
+
+
+######
+
+#Confusion matrix-accuracy-train
+pred_lda<-predict(model_lda,train_num)
+cfmatrix_1<-table(Tahmin=tahmin_1$class, Gercek=train_num$class) # sınıflandırma sonuçları
+cfmatrix_1
+accuracy_1<-sum(diag(cfmatrix_1))/sum(cfmatrix_1) # tahmin yüzdesini hesaplatır
+accuracy_1
+
+
+# %73 tahmin oranı
+
+#Confusion matrix-accuracy-test
+tahmin_lda<-predict(model_lda,test_num)
+cfmatrix_lda<-table(Tahmin=tahmin_lda$class, Gercek=test_num$class)
+cfmatrix_lda
+accuracy_lda<-sum(diag(cfmatrix_lda))/sum(cfmatrix_lda)
+accuracy_lda
+
+install.packages('ggord')
+dev.off()
+
+ggplot(df, aes(x = df$age, y = df$ca, col = class)) + 
+  geom_point() +
+  stat_ellipse() +
+  scale_color_manual(values = c("blue", "red", "green"))
+
+
+
+
+
+
+################################################################################################################################################
+
+
+
+
+
+###################################################
+#-------------------------------------------------#
+#         QUADRATIC DISCRIMINANT ANALYSIS         #
+#-------------------------------------------------#
+###################################################
+
+model_qda<-qda(class~.,data=train_num) 
+model_qda
+# Grup ortalamasindan en cok farka neden olan chol degiskeni gorunuyor
+
+##################################
+####### train verisi #############
+#######              #############
+
+tahmin_qda_1<-predict(model_qda,train_num)
+cfmatrix_qda_1<-table(Tahmin=tahmin_qda_1$class, Gercek=train_num$class)
+
+accuracy_qda_1<-mean(tahmin_qda_1$class==train_num$class)
+accuracy_qda_1
+
+
+##################################
+####### test  verisi #############
+#######              #############
+
+tahmin_qda<-predict(model_qda , newdata=test_num )
+cfmatrix_qda<-table(Tahmin=tahmin_qda$class, Gercek=test_num$class)
+
+accuracy_qda<-mean(tahmin_qda$class==test_num$class)
+accuracy_qda
+#accuracy rate  biraz dustugunu goruyoruz
+
+dev.off()
+partimat(class~., data=train_num, method="qda")
+
+
+sifir <- df[df$class==0,]
+bir <- df[df$class==1,]
+
+str(df)
+
+HZ.test(sifir[,-c(2,7,3,6,9,13,11,14)])
+HZ.test(bir[,-c(2,7,3,6,9,13,11,14)])
+
+
+
+
+DH.test(sifir[,-c(2,7,3,6,9,13,11,14)])
+DH.test(bir[,-c(2,7,3,6,9,13,11,14)])
+
+
+
+
+sıfır <- df[df$class==0, - c(2,7,3,6,9,13,11,14)] # data only for 0 class
+res1 <- AD.test(sıfır, qqplot = TRUE)
+res1
+
+# multivariate normal değil
+
+bir <- df[df$class==1, - c(2,7,3,6,9,13,11,14)] # data only for 1 class
+res2 <- AD.test(bir, qqplot = TRUE)
+res2
+
+# multivariate normal
+
+
+### Varyans Homojenliği Testi
+
+##Assumption Checking of LDA vs. QDA
+
+str(df)
+
+
+leveneTest(df$age ~ as.factor(df$class), df) # homojen 
+leveneTest(df$trestbps ~ as.factor(df$class), df) # homojen
+leveneTest(df$chol ~ as.factor(df$class), df) #homojen değil
+leveneTest(df$thalach ~ as.factor(df$class), df) # homojen
+leveneTest(df$oldpeak ~ as.factor(df$class), df)
+leveneTest(df$ca ~ as.factor(df$class), df)
+
+
+
+#We are using the BoxM test in order to check our assumption of homogeneity of variance-covariance matrices.
+#H_o = Covariance matrices of the outcome variable are equal across all groups
+#H_a = Covariance matrices of the outcome variable are different for at least one group
+
+
+
+
+
+
+boxm <- heplots::boxM(df[, c(1,4,5,8,10,12)], df$class) 
+boxm # p-value 0.05'ten küçük çıktığı için %95 güvenle bağımsız değişkenlerin kovaryans matrislerinin eşit olduğu varsayımı reddedilemez
+plot(boxm)
+
+
+
+heplots::covEllipses(df[,c(1,4,5,8,10,12)], 
+                     as.factor(df$class), 
+                     fill = TRUE, 
+                     pooled = FALSE, 
+                     col = c("blue", "green"), 
+                     variables = c(3,4), 
+                     fill.alpha = 0.05) # değişkenlere göre ne kadar ayrık olduğu görülür. yuvarlaklar büyüdükçe varyans fazlalık
+
+
+#####
+
+
+
+# NEURAL NETWORKS
+# ----------------------------------------------------------------------------------------------- #
+
+install.packages("neuralnet")
+library("neuralnet")
+str(df)
+
+# neuralneti kullanabilmek icin tum veri numerik olmali + standardize edilmis olmali
+df_dummy <- fastDummies::dummy_cols(df, select_columns = c("cp", "restecg", "slope", "thal"))
+
+str(df)
+
+
+# Verisetine kategorik degiskenlerin duzey sayisi - 1 kadar sutun eklemek amaciyla
+# fazla sutunlar verisetinden cikarilir.
+
+df_dummy <- subset(df_dummy, select = -c(cp, restecg, slope, thal, cp_4, restecg_2, slope_3, thal_7))
+df_dummy <- df_dummy[,c(1,2,3,4,5,6,7,8,9,11,12,13,14,15,16,17,18,19,10)] # changing columns sort
+
+df_dummy$cp_1 <- as.factor(df_dummy$cp_1)
+df_dummy$cp_2 <- as.factor(df_dummy$cp_2)
+df_dummy$cp_3 <- as.factor(df_dummy$cp_3)
+
+df_dummy$restecg_0 <- as.factor(df_dummy$restecg_0)
+df_dummy$restecg_1 <- as.factor(df_dummy$restecg_1)
+
+df_dummy$slope_1 <- as.factor(df_dummy$slope_1)
+df_dummy$slope_2 <- as.factor(df_dummy$slope_2)
+
+df_dummy$thal_3 <- as.factor(df_dummy$thal_3)
+df_dummy$thal_6 <- as.factor(df_dummy$thal_6)
+
+str(df_dummy)
+
+# Ortalamalarla Veri Standardizasyonu
+library(PreProcess)
+str(nndata)
+
+
+scaleModel <- caret::preProcess(df_dummy, method=c("center", "scale"))
+
+nndata <- predict(scaleModel, df_dummy)
+
+nndata$sex <- as.numeric(nndata$sex)
+nndata$sex[nndata$sex == 1] <- 0
+nnData$sex[nndata$sex == 2] <- 1
+
+nndata$fbs <- as.numeric(nndata$fbs)
+nndata$fbs[nndata$fbs == 1] <- 0
+nndata$fbs[nndata$fbs == 2] <- 1
+
+nndata$exang <- as.numeric(nndata$exang)
+nndata$exang[nndata$exang == 1] <- 0
+nndata$exang[nndata$exang == 2] <- 1
+
+nndata$class <- as.numeric(nndata$class)
+nndata$class[nndata$class == 1] <- 0
+nndata$class[nndata$class == 2] <- 1
+
+nndata$cp_1 <- as.numeric(nndata$cp_1)
+nndata$cp_1[nndata$cp_1 == 1] <- 0
+nndata$cp_1[nndata$cp_1 == 2] <- 1
+
+nndata$cp_2 <- as.numeric(nndata$cp_2)
+nndata$cp_2[nndata$cp_2 == 1] <- 0
+nndata$cp_2[nndata$cp_2 == 2] <- 1
+
+nndata$cp_3 <- as.numeric(nndata$cp_3)
+nndata$cp_3[nndata$cp_3 == 1] <- 0
+nndata$cp_3[nndata$cp_3 == 2] <- 1
+
+nndata$restecg_0 <- as.numeric(nndata$restecg_0)
+nndata$restecg_0[nndata$restecg_0 == 1] <- 0
+nndata$restecg_0[nndata$restecg_0 == 2] <- 1
+
+nndata$restecg_1 <- as.numeric(nndata$restecg_1)
+nndata$restecg_1[nndata$restecg_1 == 1] <- 0
+nndata$restecg_1[nndata$restecg_1 == 2] <- 1
+
+nndata$slope_1 <- as.numeric(nndata$slope_1)
+nndata$slope_1[nndata$slope_1 == 1] <- 0
+nndata$slope_1[nndata$slope_1 == 2] <- 1
+
+nndata$slope_2 <- as.numeric(nndata$slope_2)
+nndata$slope_2[nndata$slope_2 == 1] <- 0
+nndata$slope_2[nndata$slope_2 == 2] <- 1
+
+nndata$thal_3 <- as.numeric(nndata$thal_3)
+nndata$thal_3[nndata$thal_3 == 1] <- 0
+nndata$thal_3[nndata$thal_3 == 2] <- 1
+
+nndata$thal_6 <- as.numeric(nndata$thal_6)
+nndata$thal_6[nndata$thal_6 == 1] <- 0
+nndata$thal_6[nndata$thal_6 == 2] <- 1
+
+str(nndata)
+
+nn_traindata <- nndata[train_ind, ]
+nn_testdata <- nndata[-train_ind, ]
+
+
+dim(nn_traindata)
+dim(nn_testdata)
+
+str(nn_traindata)
+
+
+modelNN1 <- neuralnet(class ~ ., data=nn_traindata,
+                      hidden=4, threshold=0.01,
+                      learningrate = 0.05,
+                      linear.output = FALSE,
+                      err.fct="sse")
+
+plot(modelNN1)
+
+fitted_values_1 <- modelNN1$net.result[[1]]
+
+# test verisi
+pred_test_1 <- predict(modelNN1, newdata=nn_testdata)
+
+pred_test_1[pred_test_1 >= 0.50] <- 1
+pred_test_1[pred_test_1 < 0.50] <- 0
+pred_test_1 <- as.factor(pred_test_1)
+
+table_nn <- table(as.factor(pred_test_1), nn_testdata$class)
+table_nn
+
+accuracy_nn <- sum(diag(table_nn))/sum(table_nn)
+accuracy_nn
+
+caret::confusionMatrix(pred_test_1, as.factor(nn_testdata$class))
+
+
+
+
+
+##############################################################################################################################################################
+
+
+
+
+
+roc_ct  <- roc(test$class ~ as.numeric(levels(tree_pred))[tree_pred],levels = c(0, 1), direction = "<")
+roc_bag <- roc(test$class ~ as.numeric(levels(baggintest))[baggintest] , levels =c(0,1), direction="<")
+roc_rf  <- roc(test$class ~ as.numeric(levels(rf_tahmin))[rf_tahmin], levels =c(0,1), direction="<" )
+roc_log <- roc(test$class ~ pred_log, levels =c(0,1), direction="<")
+roc_lda <- roc(test_num$class ~ as.numeric(levels(tahmin_lda$class))[tahmin_lda$class], levels =c(0,1), direction="<" )
+roc_qda <- roc(test_num$class ~ as.numeric(levels(tahmin_qda$class))[tahmin_qda$class],  levels =c(0,1), direction="<" )
+
+
+lwd = 3
+plot(roc_ct, color ='green',lwd=lwd,main="ROC Curve")
+plot(roc_bag, add=TRUE, col='red',lwd=lwd) 
+plot(roc_rf, add=TRUE, col='blue',lwd=lwd)
+plot(roc_log, add=TRUE, col='purple2',lwd=lwd)
+plot(roc_lda, add=TRUE, col='brown',lwd=lwd)
+plot(roc_qda, add=TRUE, col='yellow3',lwd=lwd)
+
+
+auc(roc_ct)
+auc(roc_bag)
+auc(roc_rf)
+auc(roc_log)
+auc(roc_lda)
+auc(roc_qda)
+
+
+
