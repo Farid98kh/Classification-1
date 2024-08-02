@@ -1,13 +1,10 @@
 ####################
 # Farid Khorshidi  #
 #------------------#
-# Öğrenci Numarası #
-#    2022900191    #
 #------------------#
 #     Denetimli    #
 #   İstatistiksel  #
 #      Öğrenme     #
-#   Final Sınavı   #
 #------------------#
 
 library(readr)
